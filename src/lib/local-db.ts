@@ -65,9 +65,15 @@ export function hashPassword(password: string) {
   return createHash("sha256").update(password).digest("hex");
 }
 
+function getBootstrapCredentials() {
+  return {
+    username: (process.env.LOCAL_ADMIN_USERNAME ?? "admin").trim(),
+    password: process.env.LOCAL_ADMIN_PASSWORD ?? "admin123456",
+  };
+}
+
 function createDefaultAdmin(): LocalUserRecord {
-  const username = process.env.LOCAL_ADMIN_USERNAME ?? "admin";
-  const password = process.env.LOCAL_ADMIN_PASSWORD ?? "admin123456";
+  const { username, password } = getBootstrapCredentials();
   const ts = now();
   return {
     id: randomUUID(),
@@ -82,6 +88,48 @@ function createDefaultAdmin(): LocalUserRecord {
     created_at: ts,
     updated_at: ts,
   };
+}
+
+function ensureBootstrapAdmin(db: LocalDb): { db: LocalDb; changed: boolean } {
+  const { username, password } = getBootstrapCredentials();
+  const passwordHash = hashPassword(password);
+  let changed = false;
+
+  const existing = db.users.find((u) => u.username === username);
+  if (existing) {
+    if (existing.password_hash !== passwordHash) {
+      existing.password_hash = passwordHash;
+      changed = true;
+    }
+    if (existing.role !== "admin") {
+      existing.role = "admin";
+      changed = true;
+    }
+    if (changed) existing.updated_at = now();
+    return { db, changed };
+  }
+
+  db.users.push(createDefaultAdmin());
+  return { db, changed: true };
+}
+
+async function loadDbFromStorage(): Promise<LocalDb> {
+  try {
+    const fromRedis = await readDbFromRedis();
+    if (fromRedis) return fromRedis;
+  } catch {
+    // fall through to file / seed
+  }
+
+  const dbPath = getDbPath();
+  try {
+    const raw = await readFile(dbPath, "utf8");
+    const db = JSON.parse(raw) as LocalDb;
+    await writeDbToRedis(db);
+    return db;
+  } catch {
+    return createDefaultDb();
+  }
 }
 
 async function loadSampleQuestions(): Promise<Question[]> {
@@ -122,30 +170,16 @@ async function createDefaultDb(): Promise<LocalDb> {
 }
 
 export async function readDb(): Promise<LocalDb> {
-  if (memoryDb) return memoryDb;
-
-  try {
-    const fromRedis = await readDbFromRedis();
-    if (fromRedis) {
-      memoryDb = fromRedis;
-      return memoryDb;
-    }
-  } catch {
-    // fall through to file / seed
+  if (!memoryDb) {
+    memoryDb = await loadDbFromStorage();
   }
 
-  const dbPath = getDbPath();
-  try {
-    const raw = await readFile(dbPath, "utf8");
-    memoryDb = JSON.parse(raw) as LocalDb;
-    await writeDbToRedis(memoryDb);
-    return memoryDb;
-  } catch {
-    const seed = await createDefaultDb();
-    memoryDb = seed;
-    await writeDb(seed);
-    return seed;
+  const { db, changed } = ensureBootstrapAdmin(memoryDb);
+  memoryDb = db;
+  if (changed) {
+    await writeDb(db);
   }
+  return memoryDb;
 }
 
 export async function writeDb(db: LocalDb): Promise<void> {
