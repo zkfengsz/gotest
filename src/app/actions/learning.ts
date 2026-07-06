@@ -8,9 +8,51 @@ import {
 import { scoreExam, shuffleArray } from "@/lib/exam";
 import { requireAuth } from "@/lib/auth";
 import { mutateDb, readDb } from "@/lib/local-db";
+import { orderQuestionsByIds, syncQuestionOrder } from "@/lib/question-order";
 import type { Question, UserAnswer } from "@/types/database";
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
+
+export async function ensureLearningQuestionOrder(
+  userId: string,
+  stageId: number,
+  questionIds: string[]
+): Promise<string[]> {
+  let resultOrder = questionIds;
+
+  await mutateDb((db) => {
+    const existing = db.learning_progress.find(
+      (p) => p.user_id === userId && p.stage_id === stageId
+    );
+    const { order, changed } = syncQuestionOrder(
+      existing?.question_order,
+      questionIds
+    );
+    resultOrder = order;
+
+    if (!changed) return;
+
+    const ts = new Date().toISOString();
+    if (existing) {
+      existing.question_order = order;
+      existing.updated_at = ts;
+    } else {
+      db.learning_progress.push({
+        id: randomUUID(),
+        user_id: userId,
+        stage_id: stageId,
+        question_order: order,
+        viewed_question_ids: [],
+        learning_completed: false,
+        learning_completed_at: null,
+        created_at: ts,
+        updated_at: ts,
+      });
+    }
+  });
+
+  return resultOrder;
+}
 
 export async function markQuestionViewed(stageId: number, questionId: string) {
   const profile = await requireAuth();
@@ -49,6 +91,7 @@ export async function markQuestionViewed(stageId: number, questionId: string) {
         id: randomUUID(),
         user_id: profile.id,
         stage_id: stageId,
+        question_order: [],
         viewed_question_ids: newViewed,
         learning_completed: learningCompleted,
         learning_completed_at: learningCompleted

@@ -24,7 +24,10 @@ export function LearnClient({
   canTakeExam,
 }: LearnClientProps) {
   const viewed = new Set(progress?.viewed_question_ids ?? []);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    const firstUnviewed = questions.findIndex((q) => !viewed.has(q.id));
+    return firstUnviewed >= 0 ? firstUnviewed : 0;
+  });
   const [showAnswer, setShowAnswer] = useState(false);
   const [practiceAnswers, setPracticeAnswers] = useState<
     Record<string, string | string[] | { left: string; right: string }[]>

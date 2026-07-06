@@ -1,7 +1,9 @@
+import { ensureLearningQuestionOrder } from "@/app/actions/learning";
 import { LearnClient } from "@/components/learn/learn-client";
 import { requireAuth } from "@/lib/auth";
 import { STAGE_LABELS } from "@/lib/constants";
 import { readDb } from "@/lib/local-db";
+import { orderQuestionsByIds } from "@/lib/question-order";
 import { notFound, redirect } from "next/navigation";
 
 interface Props {
@@ -17,11 +19,18 @@ export default async function LearnPage({ params }: Props) {
   if (stageId > profile.current_stage) redirect("/dashboard");
 
   const db = await readDb();
-  const questions = db.questions
-    .filter((q) => q.stage_id === stageId && q.is_active)
-    .sort((a, b) => a.order_index - b.order_index);
+  const stageQuestions = db.questions.filter(
+    (q) => q.stage_id === stageId && q.is_active
+  );
+  const questionOrder = await ensureLearningQuestionOrder(
+    profile.id,
+    stageId,
+    stageQuestions.map((q) => q.id)
+  );
+  const questions = orderQuestionsByIds(stageQuestions, questionOrder);
+  const latestDb = await readDb();
   const progress =
-    db.learning_progress.find(
+    latestDb.learning_progress.find(
       (p) => p.user_id === profile.id && p.stage_id === stageId
     ) ?? null;
 
@@ -31,7 +40,9 @@ export default async function LearnPage({ params }: Props) {
         <h1 className="text-2xl font-bold text-[#003366]">
           {STAGE_LABELS[stageId]}
         </h1>
-        <p className="text-muted-foreground mt-1">学习模式 · 浏览题目与解析</p>
+        <p className="text-muted-foreground mt-1">
+          学习模式 · 题目顺序已为你随机排列
+        </p>
       </div>
       <LearnClient
         stageId={stageId}

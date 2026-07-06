@@ -47,6 +47,7 @@ export interface LearningProgress {
   id: string;
   user_id: string;
   stage_id: number;
+  question_order: string[];
   viewed_question_ids: string[];
   learning_completed: boolean;
   learning_completed_at: string | null;
