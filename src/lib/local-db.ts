@@ -8,6 +8,7 @@ import type {
 import { createHash, randomUUID } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
+import sampleQuestionsData from "../../data/sample-questions.json";
 
 interface LocalUserRecord extends Profile {
   username: string;
@@ -21,8 +22,24 @@ interface LocalDb {
   exam_records: ExamRecord[];
 }
 
-const DB_PATH = path.join(process.cwd(), "data", "local-db.json");
 const SAMPLE_QUESTIONS_PATH = path.join(process.cwd(), "data", "sample-questions.json");
+
+function isServerless(): boolean {
+  return Boolean(
+    process.env.NETLIFY ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME ||
+      process.env.VERCEL
+  );
+}
+
+function getDbPath(): string {
+  if (isServerless()) {
+    return path.join("/tmp", "gotest", "local-db.json");
+  }
+  return path.join(process.cwd(), "data", "local-db.json");
+}
+
+let memoryDb: LocalDb | null = null;
 
 function now() {
   return new Date().toISOString();
@@ -52,28 +69,31 @@ function createDefaultAdmin(): LocalUserRecord {
 }
 
 async function loadSampleQuestions(): Promise<Question[]> {
+  let items: Array<
+    Omit<Question, "id" | "created_at" | "updated_at" | "is_active">
+  > = [];
+
   try {
     const raw = await readFile(SAMPLE_QUESTIONS_PATH, "utf8");
-    const items = JSON.parse(raw) as Array<
-      Omit<Question, "id" | "created_at" | "updated_at" | "is_active">
-    >;
-    const ts = now();
-    return items.map((q, idx) => ({
-      id: randomUUID(),
-      stage_id: q.stage_id,
-      type: q.type,
-      content: q.content,
-      options: q.options,
-      correct_answer: q.correct_answer,
-      explanation: q.explanation ?? null,
-      order_index: q.order_index ?? idx,
-      is_active: true,
-      created_at: ts,
-      updated_at: ts,
-    }));
+    items = JSON.parse(raw) as typeof items;
   } catch {
-    return [];
+    items = sampleQuestionsData as typeof items;
   }
+
+  const ts = now();
+  return items.map((q, idx) => ({
+    id: randomUUID(),
+    stage_id: q.stage_id,
+    type: q.type,
+    content: q.content,
+    options: q.options,
+    correct_answer: q.correct_answer,
+    explanation: q.explanation ?? null,
+    order_index: q.order_index ?? idx,
+    is_active: true,
+    created_at: ts,
+    updated_at: ts,
+  }));
 }
 
 async function createDefaultDb(): Promise<LocalDb> {
@@ -86,19 +106,30 @@ async function createDefaultDb(): Promise<LocalDb> {
 }
 
 export async function readDb(): Promise<LocalDb> {
+  if (memoryDb) return memoryDb;
+
+  const dbPath = getDbPath();
   try {
-    const raw = await readFile(DB_PATH, "utf8");
-    return JSON.parse(raw) as LocalDb;
+    const raw = await readFile(dbPath, "utf8");
+    memoryDb = JSON.parse(raw) as LocalDb;
+    return memoryDb;
   } catch {
     const seed = await createDefaultDb();
+    memoryDb = seed;
     await writeDb(seed);
     return seed;
   }
 }
 
 export async function writeDb(db: LocalDb): Promise<void> {
-  await mkdir(path.dirname(DB_PATH), { recursive: true });
-  await writeFile(DB_PATH, JSON.stringify(db, null, 2), "utf8");
+  memoryDb = db;
+  const dbPath = getDbPath();
+  try {
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    await writeFile(dbPath, JSON.stringify(db, null, 2), "utf8");
+  } catch {
+    // Netlify/Lambda: only /tmp is writable; keep in-memory for this instance.
+  }
 }
 
 export function toProfile(user: LocalUserRecord): Profile {
