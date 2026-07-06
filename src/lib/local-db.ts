@@ -9,6 +9,7 @@ import { createHash, randomUUID } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import sampleQuestionsData from "../../data/sample-questions.json";
+import { getRedis } from "@/lib/redis";
 
 interface LocalUserRecord extends Profile {
   username: string;
@@ -40,6 +41,21 @@ function getDbPath(): string {
 }
 
 let memoryDb: LocalDb | null = null;
+
+const REDIS_DB_KEY = "app:local-db";
+
+async function readDbFromRedis(): Promise<LocalDb | null> {
+  const redis = getRedis();
+  if (!redis) return null;
+  const data = await redis.get<LocalDb>(REDIS_DB_KEY);
+  return data ?? null;
+}
+
+async function writeDbToRedis(db: LocalDb): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+  await redis.set(REDIS_DB_KEY, db);
+}
 
 function now() {
   return new Date().toISOString();
@@ -108,10 +124,21 @@ async function createDefaultDb(): Promise<LocalDb> {
 export async function readDb(): Promise<LocalDb> {
   if (memoryDb) return memoryDb;
 
+  try {
+    const fromRedis = await readDbFromRedis();
+    if (fromRedis) {
+      memoryDb = fromRedis;
+      return memoryDb;
+    }
+  } catch {
+    // fall through to file / seed
+  }
+
   const dbPath = getDbPath();
   try {
     const raw = await readFile(dbPath, "utf8");
     memoryDb = JSON.parse(raw) as LocalDb;
+    await writeDbToRedis(memoryDb);
     return memoryDb;
   } catch {
     const seed = await createDefaultDb();
@@ -123,12 +150,13 @@ export async function readDb(): Promise<LocalDb> {
 
 export async function writeDb(db: LocalDb): Promise<void> {
   memoryDb = db;
+  await writeDbToRedis(db);
   const dbPath = getDbPath();
   try {
     await mkdir(path.dirname(dbPath), { recursive: true });
     await writeFile(dbPath, JSON.stringify(db, null, 2), "utf8");
   } catch {
-    // Netlify/Lambda: only /tmp is writable; keep in-memory for this instance.
+    // Netlify/Lambda: only /tmp is writable; Redis is the source of truth.
   }
 }
 

@@ -13,7 +13,7 @@ export async function signInWithPassword(username: string, password: string) {
   if (!profile) return { error: "用户名或密码错误" };
 
   await setSession({ userId: profile.id, role: profile.role });
-  return { success: true };
+  return { success: true, role: profile.role };
 }
 
 export async function signOut() {

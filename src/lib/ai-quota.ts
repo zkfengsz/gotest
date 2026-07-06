@@ -1,18 +1,11 @@
 import { Ratelimit } from "@upstash/ratelimit";
-import { Redis } from "@upstash/redis";
 import { AI_MAX_QUESTIONS_PER_ITEM, AI_QUOTA_TTL_SECONDS } from "@/lib/ai-config";
+import { getRedis, isRedisConfigured } from "@/lib/redis";
 
 export interface QuotaResult {
   allowed: boolean;
   remaining: number;
   limit: number;
-}
-
-function getRedis(): Redis | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-  return new Redis({ url, token });
 }
 
 const redis = getRedis();
@@ -111,6 +104,4 @@ export async function getDailyAiCallCount(): Promise<number> {
   return Number(count ?? 0);
 }
 
-export function isRedisConfigured(): boolean {
-  return redis !== null;
-}
+export { isRedisConfigured };
