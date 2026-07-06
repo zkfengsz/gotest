@@ -1,0 +1,54 @@
+[
+  {
+    "stage_id": 1,
+    "type": "single",
+    "content": "以下哪项最能描述「生成式 AI」(Generative AI)？",
+    "options": [
+      { "id": "A", "text": "仅能执行预设规则的传统软件" },
+      { "id": "B", "text": "能够根据输入生成新内容（文本、图像等）的 AI 系统" },
+      { "id": "C", "text": "专门用于数据库存储的技术" },
+      { "id": "D", "text": "一种网络防火墙技术" }
+    ],
+    "correct_answer": "B",
+    "explanation": "生成式 AI 的核心能力是根据训练数据和用户输入，生成全新的文本、图像、代码等内容。",
+    "order_index": 0
+  },
+  {
+    "stage_id": 1,
+    "type": "multiple",
+    "content": "以下哪些属于大语言模型 (LLM) 的典型应用场景？（多选）",
+    "options": [
+      { "id": "A", "text": "撰写邮件与报告" },
+      { "id": "B", "text": "代码辅助编写" },
+      { "id": "C", "text": "物理芯片制造" },
+      { "id": "D", "text": "知识问答与总结" }
+    ],
+    "correct_answer": ["A", "B", "D"],
+    "explanation": "LLM 擅长自然语言处理任务，包括写作、编程辅助和知识问答，但不直接参与硬件制造。",
+    "order_index": 1
+  },
+  {
+    "stage_id": 1,
+    "type": "drag",
+    "content": "请将左侧 AI 术语与右侧定义进行匹配：",
+    "options": {
+      "left": [
+        { "id": "l1", "text": "Prompt" },
+        { "id": "l2", "text": "Token" },
+        { "id": "l3", "text": "Hallucination" }
+      ],
+      "right": [
+        { "id": "r1", "text": "模型处理文本的最小单位" },
+        { "id": "r2", "text": "用户输入给模型的指令或问题" },
+        { "id": "r3", "text": "模型生成不准确或虚构的信息" }
+      ]
+    },
+    "correct_answer": [
+      { "left": "l1", "right": "r2" },
+      { "left": "l2", "right": "r1" },
+      { "left": "l3", "right": "r3" }
+    ],
+    "explanation": "Prompt 是提示词，Token 是词元，Hallucination 指 AI 幻觉现象。",
+    "order_index": 2
+  }
+]
