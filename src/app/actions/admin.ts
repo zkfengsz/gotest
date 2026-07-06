@@ -3,10 +3,10 @@
 import { requireAdmin } from "@/lib/auth";
 import { randomUUID } from "crypto";
 import {
+  mutateDb,
   readDb,
   upsertUser,
   updateUserRole as updateRoleInDb,
-  writeDb,
 } from "@/lib/local-db";
 import {
   parseQuestionsJson,
@@ -61,7 +61,6 @@ export async function upsertQuestion(
   }
 ): Promise<{ success?: boolean; error?: string }> {
   await requireAdmin();
-  const db = await readDb();
   const ts = new Date().toISOString();
 
   const payload: Question = {
@@ -78,18 +77,18 @@ export async function upsertQuestion(
     updated_at: ts,
   };
 
-  const idx = db.questions.findIndex((q) => q.id === payload.id);
-  if (idx >= 0) {
-    db.questions[idx] = {
-      ...db.questions[idx],
-      ...payload,
-      updated_at: ts,
-    };
-  } else {
-    db.questions.push(payload);
-  }
-
-  await writeDb(db);
+  await mutateDb((db) => {
+    const idx = db.questions.findIndex((q) => q.id === payload.id);
+    if (idx >= 0) {
+      db.questions[idx] = {
+        ...db.questions[idx],
+        ...payload,
+        updated_at: ts,
+      };
+    } else {
+      db.questions.push(payload);
+    }
+  });
 
   revalidatePath("/admin/questions");
   return { success: true };
@@ -99,9 +98,9 @@ export async function deleteQuestion(
   id: string
 ): Promise<{ success?: boolean; error?: string }> {
   await requireAdmin();
-  const db = await readDb();
-  db.questions = db.questions.filter((q) => q.id !== id);
-  await writeDb(db);
+  await mutateDb((db) => {
+    db.questions = db.questions.filter((q) => q.id !== id);
+  });
   revalidatePath("/admin/questions");
   return { success: true };
 }
@@ -134,9 +133,9 @@ export async function importQuestions(
     updated_at: ts,
   }));
 
-  const db = await readDb();
-  db.questions.push(...rows);
-  await writeDb(db);
+  await mutateDb((db) => {
+    db.questions.push(...rows);
+  });
 
   revalidatePath("/admin/questions");
   return { success: true, count: rows.length };

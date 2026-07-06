@@ -23,42 +23,34 @@ interface LocalDb {
   exam_records: ExamRecord[];
 }
 
-const SAMPLE_QUESTIONS_PATH = path.join(process.cwd(), "data", "sample-questions.json");
+const SAMPLE_QUESTIONS_PATH = path.join(
+  process.cwd(),
+  "data",
+  "sample-questions.json"
+);
+const REDIS_DB_KEY = "app:local-db";
 
-function isServerless(): boolean {
-  return Boolean(
+/** In-memory cache only for local dev without Redis */
+let localMemoryDb: LocalDb | null = null;
+
+function now() {
+  return new Date().toISOString();
+}
+
+function getDbPath(): string {
+  const serverless = Boolean(
     process.env.NETLIFY ||
       process.env.AWS_LAMBDA_FUNCTION_NAME ||
       process.env.VERCEL
   );
-}
-
-function getDbPath(): string {
-  if (isServerless()) {
+  if (serverless) {
     return path.join("/tmp", "gotest", "local-db.json");
   }
   return path.join(process.cwd(), "data", "local-db.json");
 }
 
-let memoryDb: LocalDb | null = null;
-
-const REDIS_DB_KEY = "app:local-db";
-
-async function readDbFromRedis(): Promise<LocalDb | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-  const data = await redis.get<LocalDb>(REDIS_DB_KEY);
-  return data ?? null;
-}
-
-async function writeDbToRedis(db: LocalDb): Promise<void> {
-  const redis = getRedis();
-  if (!redis) return;
-  await redis.set(REDIS_DB_KEY, db);
-}
-
-function now() {
-  return new Date().toISOString();
+function usesRedis(): boolean {
+  return getRedis() !== null;
 }
 
 export function hashPassword(password: string) {
@@ -113,25 +105,6 @@ function ensureBootstrapAdmin(db: LocalDb): { db: LocalDb; changed: boolean } {
   return { db, changed: true };
 }
 
-async function loadDbFromStorage(): Promise<LocalDb> {
-  try {
-    const fromRedis = await readDbFromRedis();
-    if (fromRedis) return fromRedis;
-  } catch {
-    // fall through to file / seed
-  }
-
-  const dbPath = getDbPath();
-  try {
-    const raw = await readFile(dbPath, "utf8");
-    const db = JSON.parse(raw) as LocalDb;
-    await writeDbToRedis(db);
-    return db;
-  } catch {
-    return createDefaultDb();
-  }
-}
-
 async function loadSampleQuestions(): Promise<Question[]> {
   let items: Array<
     Omit<Question, "id" | "created_at" | "updated_at" | "is_active">
@@ -169,29 +142,91 @@ async function createDefaultDb(): Promise<LocalDb> {
   };
 }
 
-export async function readDb(): Promise<LocalDb> {
-  if (!memoryDb) {
-    memoryDb = await loadDbFromStorage();
-  }
-
-  const { db, changed } = ensureBootstrapAdmin(memoryDb);
-  memoryDb = db;
-  if (changed) {
-    await writeDb(db);
-  }
-  return memoryDb;
+async function readDbFromRedis(): Promise<LocalDb | null> {
+  const redis = getRedis();
+  if (!redis) return null;
+  const data = await redis.get<LocalDb>(REDIS_DB_KEY);
+  return data ?? null;
 }
 
-export async function writeDb(db: LocalDb): Promise<void> {
-  memoryDb = db;
-  await writeDbToRedis(db);
+async function writeDbToRedis(db: LocalDb): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+  await redis.set(REDIS_DB_KEY, db);
+}
+
+async function loadFreshDb(): Promise<LocalDb> {
+  const redis = getRedis();
+
+  if (redis) {
+    const existing = await readDbFromRedis();
+    if (existing) return existing;
+
+    const seed = await createDefaultDb();
+    const acquired = await redis.set(REDIS_DB_KEY, seed, { nx: true });
+    if (acquired) return seed;
+
+    const raced = await readDbFromRedis();
+    if (raced) return raced;
+
+    throw new Error("数据库加载失败，请稍后重试");
+  }
+
+  if (localMemoryDb) return localMemoryDb;
+
+  const dbPath = getDbPath();
+  try {
+    const raw = await readFile(dbPath, "utf8");
+    localMemoryDb = JSON.parse(raw) as LocalDb;
+    return localMemoryDb;
+  } catch {
+    localMemoryDb = await createDefaultDb();
+    await persistDbLocal(localMemoryDb);
+    return localMemoryDb;
+  }
+}
+
+async function persistDbLocal(db: LocalDb): Promise<void> {
   const dbPath = getDbPath();
   try {
     await mkdir(path.dirname(dbPath), { recursive: true });
     await writeFile(dbPath, JSON.stringify(db, null, 2), "utf8");
   } catch {
-    // Netlify/Lambda: only /tmp is writable; Redis is the source of truth.
+    // ignore on read-only filesystem
   }
+}
+
+async function persistDb(db: LocalDb): Promise<void> {
+  if (usesRedis()) {
+    await writeDbToRedis(db);
+    return;
+  }
+
+  localMemoryDb = db;
+  await persistDbLocal(db);
+}
+
+export async function readDb(): Promise<LocalDb> {
+  const db = await loadFreshDb();
+  const { db: synced, changed } = ensureBootstrapAdmin(db);
+  if (changed) {
+    await persistDb(synced);
+  }
+  return synced;
+}
+
+export async function writeDb(db: LocalDb): Promise<void> {
+  await persistDb(db);
+}
+
+export async function mutateDb(
+  mutator: (db: LocalDb) => void | Promise<void>
+): Promise<LocalDb> {
+  const db = await loadFreshDb();
+  await mutator(db);
+  const { db: synced } = ensureBootstrapAdmin(db);
+  await persistDb(synced);
+  return synced;
 }
 
 export function toProfile(user: LocalUserRecord): Profile {
@@ -219,13 +254,15 @@ export async function listProfiles() {
 }
 
 export async function updateUserRole(userId: string, role: UserRole) {
-  const db = await readDb();
-  const user = db.users.find((u) => u.id === userId);
-  if (!user) return false;
-  user.role = role;
-  user.updated_at = now();
-  await writeDb(db);
-  return true;
+  let found = false;
+  await mutateDb((db) => {
+    const user = db.users.find((u) => u.id === userId);
+    if (!user) return;
+    found = true;
+    user.role = role;
+    user.updated_at = now();
+  });
+  return found;
 }
 
 export async function upsertUser(params: {
@@ -235,40 +272,46 @@ export async function upsertUser(params: {
   full_name?: string | null;
   role?: UserRole;
 }) {
-  const db = await readDb();
-  const ts = now();
   const username = params.username.trim();
   if (!username) return { error: "用户名不能为空" };
 
-  if (params.id) {
-    const user = db.users.find((u) => u.id === params.id);
-    if (!user) return { error: "用户不存在" };
-    user.username = username;
-    user.email = username;
-    user.full_name = params.full_name ?? user.full_name;
-    user.role = params.role ?? user.role;
-    if (params.password) user.password_hash = hashPassword(params.password);
-    user.updated_at = ts;
-  } else {
-    if (!params.password) return { error: "新建用户必须提供密码" };
-    if (db.users.some((u) => u.username === username)) {
-      return { error: "用户名已存在" };
-    }
-    db.users.push({
-      id: randomUUID(),
-      username,
-      password_hash: hashPassword(params.password),
-      email: username,
-      full_name: params.full_name ?? username,
-      role: params.role ?? "user",
-      current_stage: 1,
-      max_passed_stage: 0,
-      certificate_issued_at: null,
-      created_at: ts,
-      updated_at: ts,
-    });
-  }
+  try {
+    await mutateDb((db) => {
+      const ts = now();
 
-  await writeDb(db);
-  return { success: true };
+      if (params.id) {
+        const user = db.users.find((u) => u.id === params.id);
+        if (!user) throw new Error("用户不存在");
+        user.username = username;
+        user.email = username;
+        user.full_name = params.full_name ?? user.full_name;
+        user.role = params.role ?? user.role;
+        if (params.password) user.password_hash = hashPassword(params.password);
+        user.updated_at = ts;
+        return;
+      }
+
+      if (!params.password) throw new Error("新建用户必须提供密码");
+      if (db.users.some((u) => u.username === username)) {
+        throw new Error("用户名已存在");
+      }
+
+      db.users.push({
+        id: randomUUID(),
+        username,
+        password_hash: hashPassword(params.password!),
+        email: username,
+        full_name: params.full_name ?? username,
+        role: params.role ?? "user",
+        current_stage: 1,
+        max_passed_stage: 0,
+        certificate_issued_at: null,
+        created_at: ts,
+        updated_at: ts,
+      });
+    });
+    return { success: true };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "保存失败" };
+  }
 }
