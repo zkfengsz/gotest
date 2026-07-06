@@ -1,5 +1,5 @@
 import { findUserByUsername, listProfiles, toProfile } from "@/lib/local-db";
-import { clearSession, getSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import type { Profile } from "@/types/database";
 import { redirect } from "next/navigation";
 
@@ -12,12 +12,14 @@ export async function getProfile(): Promise<Profile | null> {
   const session = await getSession();
   if (!session) return null;
   const users = await listProfiles();
-  const profile = users.find((u) => u.id === session.userId) ?? null;
-  if (!profile) {
-    await clearSession();
-    return null;
-  }
-  return profile;
+  return users.find((u) => u.id === session.userId) ?? null;
+}
+
+export async function redirectIfStaleSession() {
+  const session = await getSession();
+  if (!session) return;
+  const profile = await getProfile();
+  if (!profile) redirect("/api/auth/clear-session");
 }
 
 export async function verifyCredentials(username: string, passwordHash: string) {
@@ -28,6 +30,7 @@ export async function verifyCredentials(username: string, passwordHash: string) 
 }
 
 export async function requireAuth(): Promise<Profile> {
+  await redirectIfStaleSession();
   const profile = await getProfile();
   if (!profile) redirect("/login");
   return profile;
