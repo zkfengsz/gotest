@@ -1,20 +1,23 @@
 import { findUserByUsername, listProfiles, toProfile } from "@/lib/local-db";
-import { getSession } from "@/lib/session";
+import { clearSession, getSession } from "@/lib/session";
 import type { Profile } from "@/types/database";
 import { redirect } from "next/navigation";
 
 export async function getSessionUser() {
-  const session = await getSession();
-  if (!session) return null;
-  const users = await listProfiles();
-  return users.find((u) => u.id === session.userId) ?? null;
+  const profile = await getProfile();
+  return profile;
 }
 
 export async function getProfile(): Promise<Profile | null> {
   const session = await getSession();
   if (!session) return null;
   const users = await listProfiles();
-  return users.find((u) => u.id === session.userId) ?? null;
+  const profile = users.find((u) => u.id === session.userId) ?? null;
+  if (!profile) {
+    await clearSession();
+    return null;
+  }
+  return profile;
 }
 
 export async function verifyCredentials(username: string, passwordHash: string) {
