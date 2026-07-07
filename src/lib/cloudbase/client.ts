@@ -11,9 +11,11 @@ export function getCloudBaseAuth() {
   }
 
   if (!app) {
+    const accessKey = process.env.NEXT_PUBLIC_TCB_ACCESS_KEY;
     app = cloudbase.init({
       env: envId,
       region: process.env.NEXT_PUBLIC_TCB_REGION ?? "ap-shanghai",
+      ...(accessKey ? { accessKey } : {}),
     });
   }
 

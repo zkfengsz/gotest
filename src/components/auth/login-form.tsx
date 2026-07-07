@@ -71,8 +71,20 @@ export function LoginForm() {
 
       setOtpVerifier(data as OtpVerifier);
       setStep("code");
-    } catch {
-      setError("CloudBase 未配置或网络异常，请检查环境变量");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "CloudBase 初始化失败";
+      if (message.includes("NEXT_PUBLIC_TCB_ENV_ID")) {
+        setError(
+          "未配置 NEXT_PUBLIC_TCB_ENV_ID：请在 Netlify 环境变量中设置并重新部署"
+        );
+      } else if (message.includes("accessKey") || message.includes("Access")) {
+        setError(
+          "未配置 CloudBase Publishable Key：请在 Netlify 设置 NEXT_PUBLIC_TCB_ACCESS_KEY 并重新部署"
+        );
+      } else {
+        setError(`CloudBase 异常：${message}`);
+      }
     }
 
     setLoading(false);
