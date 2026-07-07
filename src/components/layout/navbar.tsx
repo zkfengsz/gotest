@@ -2,9 +2,11 @@
 
 import { signOut } from "@/app/actions/auth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
 import type { Profile } from "@/types/database";
-import { Brain, LayoutDashboard, LogOut, Settings, Users } from "lucide-react";
+import { Brain, LogOut } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 interface NavbarProps {
@@ -12,6 +14,7 @@ interface NavbarProps {
 }
 
 export function Navbar({ profile }: NavbarProps) {
+  const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const initials = (profile.full_name ?? profile.email)
@@ -42,6 +45,21 @@ export function Navbar({ profile }: NavbarProps) {
     };
   }, []);
 
+  const navLinkClass = (active: boolean) =>
+    cn(
+      "text-sm font-medium transition-colors",
+      active
+        ? "text-[#003366]"
+        : "text-muted-foreground hover:text-[#003366]"
+    );
+
+  const isLearningActive =
+    pathname === "/dashboard" ||
+    pathname.startsWith("/learn/") ||
+    pathname.startsWith("/certificate");
+  const isCertificateActive = pathname.startsWith("/certificate");
+  const isAdminActive = pathname.startsWith("/admin");
+
   return (
     <header className="sticky top-0 z-50 border-b bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
@@ -55,14 +73,14 @@ export function Navbar({ profile }: NavbarProps) {
         <nav className="hidden items-center gap-6 md:flex">
           <Link
             href="/dashboard"
-            className="text-sm font-medium text-muted-foreground transition-colors hover:text-[#003366]"
+            className={navLinkClass(isLearningActive && !isCertificateActive)}
           >
             学习中心
           </Link>
           {profile.max_passed_stage >= 3 && (
             <Link
               href="/certificate"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-[#003366]"
+              className={navLinkClass(isCertificateActive)}
             >
               结业证书
             </Link>
@@ -70,7 +88,7 @@ export function Navbar({ profile }: NavbarProps) {
           {profile.role === "admin" && (
             <Link
               href="/admin"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-[#003366]"
+              className={navLinkClass(isAdminActive)}
             >
               管理后台
             </Link>
@@ -100,38 +118,6 @@ export function Navbar({ profile }: NavbarProps) {
                 <p className="text-sm font-medium">{profile.full_name ?? "用户"}</p>
                 <p className="text-xs text-muted-foreground">{profile.email}</p>
               </div>
-              <div className="-mx-1 my-1 h-px bg-border" />
-              <Link
-                href="/dashboard"
-                className="relative flex items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                学习中心
-              </Link>
-              {profile.role === "admin" && (
-                <Link
-                  href="/admin"
-                  className="relative flex items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                >
-                  <Settings className="h-4 w-4" />
-                  管理后台
-                </Link>
-              )}
-              {profile.role === "admin" && (
-                <Link
-                  href="/admin/users"
-                  className="relative flex items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                >
-                  <Users className="h-4 w-4" />
-                  用户管理
-                </Link>
-              )}
               <div className="-mx-1 my-1 h-px bg-border" />
               <button
                 type="button"
