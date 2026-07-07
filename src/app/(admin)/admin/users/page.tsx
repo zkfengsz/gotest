@@ -9,7 +9,7 @@ export default async function AdminUsersPage() {
       <div>
         <h1 className="text-2xl font-bold text-[#003366]">用户管理</h1>
         <p className="text-muted-foreground mt-1">
-          查看学习进度与考试成绩，管理用户角色
+          查看已通过邮箱登录的用户，管理角色（账号由用户自助注册）
         </p>
       </div>
       <UserTable profiles={profiles} progress={progress} exams={exams} />

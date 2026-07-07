@@ -1,6 +1,6 @@
 import { Navbar } from "@/components/layout/navbar";
 import { requireAdmin } from "@/lib/auth";
-import { BookOpen, LayoutDashboard, Users } from "lucide-react";
+import { BookOpen, LayoutDashboard, Mail, Users } from "lucide-react";
 import Link from "next/link";
 
 export default async function AdminLayout({
@@ -28,6 +28,13 @@ export default async function AdminLayout({
           >
             <Users className="h-4 w-4" />
             用户管理
+          </Link>
+          <Link
+            href="/admin/email-allowlist"
+            className="flex items-center gap-2 border-b-2 border-transparent py-3 text-sm font-medium text-muted-foreground hover:text-[#003366]"
+          >
+            <Mail className="h-4 w-4" />
+            邮箱白名单
           </Link>
           <Link
             href="/admin/questions"

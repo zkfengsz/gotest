@@ -1,13 +1,8 @@
 "use client";
 
-import {
-  createUserAccount,
-  resetUserPassword,
-  updateUserRole,
-} from "@/app/actions/admin";
+import { updateUserRole } from "@/app/actions/admin";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -16,7 +11,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { ExamRecord, LearningProgress, Profile } from "@/types/database";
-import { useState } from "react";
 import { toast } from "sonner";
 
 interface UserTableProps {
@@ -26,40 +20,16 @@ interface UserTableProps {
 }
 
 export function UserTable({ profiles, progress, exams }: UserTableProps) {
-  const [username, setUsername] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [password, setPassword] = useState("");
-
   async function handleRoleChange(userId: string, role: "admin" | "user") {
     const result = await updateUserRole(userId, role);
     if (result.error) toast.error(result.error);
     else toast.success("角色已更新");
   }
 
-  async function handleCreateUser() {
-    const result = await createUserAccount(username, password, fullName);
-    if (result.error) return toast.error(result.error);
-    toast.success("用户已创建");
-    setUsername("");
-    setFullName("");
-    setPassword("");
-  }
-
-  async function handleResetPassword(userId: string) {
-    const newPassword = window.prompt("请输入新密码（至少 6 位）");
-    if (!newPassword) return;
-    const result = await resetUserPassword(userId, newPassword);
-    if (result.error) return toast.error(result.error);
-    toast.success("密码已重置");
-  }
-
   function getUserProgress(userId: string) {
     const stages = progress.filter((p) => p.user_id === userId);
     const completed = stages.filter((s) => s.learning_completed).length;
-    const current = stages.length > 0
-      ? Math.max(...stages.map((s) => s.stage_id))
-      : 1;
-    return { completed, current };
+    return { completed };
   }
 
   function getUserExams(userId: string) {
@@ -67,40 +37,11 @@ export function UserTable({ profiles, progress, exams }: UserTableProps) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-lg border p-4 bg-slate-50/60">
-        <p className="text-sm font-medium mb-3">创建用户（用户名 + 密码）</p>
-        <div className="grid gap-2 md:grid-cols-4">
-          <Input
-            placeholder="用户名"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <Input
-            placeholder="姓名（可选）"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-          />
-          <Input
-            placeholder="初始密码"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <Button
-            className="bg-[#003366] hover:bg-[#002244]"
-            onClick={handleCreateUser}
-          >
-            新建用户
-          </Button>
-        </div>
-      </div>
-
-      <div className="rounded-lg border overflow-hidden">
+    <div className="rounded-lg border overflow-hidden">
       <table className="w-full text-sm">
         <thead className="bg-slate-50">
           <tr>
-            <th className="px-4 py-3 text-left font-medium">用户（用户名）</th>
+            <th className="px-4 py-3 text-left font-medium">用户</th>
             <th className="px-4 py-3 text-left font-medium">角色</th>
             <th className="px-4 py-3 text-left font-medium">当前阶段</th>
             <th className="px-4 py-3 text-left font-medium">已通过阶段</th>
@@ -148,29 +89,20 @@ export function UserTable({ profiles, progress, exams }: UserTableProps) {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    <Select
-                      value={p.role}
-                      onValueChange={(v) =>
-                        v && handleRoleChange(p.id, v as "admin" | "user")
-                      }
-                    >
-                      <SelectTrigger className="w-28 h-8">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="user">用户</SelectItem>
-                        <SelectItem value="admin">管理员</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      variant="outline"
-                      className="h-8"
-                      onClick={() => handleResetPassword(p.id)}
-                    >
-                      重置密码
-                    </Button>
-                  </div>
+                  <Select
+                    value={p.role}
+                    onValueChange={(v) =>
+                      v && handleRoleChange(p.id, v as "admin" | "user")
+                    }
+                  >
+                    <SelectTrigger className="w-28 h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user">用户</SelectItem>
+                      <SelectItem value="admin">管理员</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </td>
               </tr>
             );
@@ -178,9 +110,10 @@ export function UserTable({ profiles, progress, exams }: UserTableProps) {
         </tbody>
       </table>
       {profiles.length === 0 && (
-        <p className="py-12 text-center text-muted-foreground">暂无用户</p>
+        <p className="py-12 text-center text-muted-foreground">
+          暂无用户，用户通过邮箱验证码登录后将自动出现在此列表
+        </p>
       )}
-    </div>
     </div>
   );
 }

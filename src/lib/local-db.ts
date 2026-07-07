@@ -1,19 +1,22 @@
 import type {
+  EmailAllowlistEntry,
   ExamRecord,
   LearningProgress,
   Profile,
   Question,
   UserRole,
 } from "@/types/database";
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import sampleQuestionsData from "../../data/sample-questions.json";
 import { getRedis } from "@/lib/redis";
 
 interface LocalUserRecord extends Profile {
-  username: string;
-  password_hash: string;
+  /** @deprecated legacy password auth */
+  username?: string;
+  /** @deprecated legacy password auth */
+  password_hash?: string;
 }
 
 interface LocalDb {
@@ -21,6 +24,7 @@ interface LocalDb {
   questions: Question[];
   learning_progress: LearningProgress[];
   exam_records: ExamRecord[];
+  email_allowlist: EmailAllowlistEntry[];
 }
 
 const SAMPLE_QUESTIONS_PATH = path.join(
@@ -53,56 +57,11 @@ function usesRedis(): boolean {
   return getRedis() !== null;
 }
 
-export function hashPassword(password: string) {
-  return createHash("sha256").update(password).digest("hex");
-}
-
-function getBootstrapCredentials() {
-  return {
-    username: (process.env.LOCAL_ADMIN_USERNAME ?? "admin").trim(),
-    password: process.env.LOCAL_ADMIN_PASSWORD ?? "admin123456",
-  };
-}
-
-function createDefaultAdmin(): LocalUserRecord {
-  const { username, password } = getBootstrapCredentials();
-  const ts = now();
-  return {
-    id: randomUUID(),
-    username,
-    password_hash: hashPassword(password),
-    email: username,
-    full_name: "System Admin",
-    role: "admin",
-    current_stage: 1,
-    max_passed_stage: 0,
-    certificate_issued_at: null,
-    created_at: ts,
-    updated_at: ts,
-  };
-}
-
-function ensureBootstrapAdmin(db: LocalDb): { db: LocalDb; changed: boolean } {
-  const { username, password } = getBootstrapCredentials();
-  const passwordHash = hashPassword(password);
-  let changed = false;
-
-  const existing = db.users.find((u) => u.username === username);
-  if (existing) {
-    if (existing.password_hash !== passwordHash) {
-      existing.password_hash = passwordHash;
-      changed = true;
-    }
-    if (existing.role !== "admin") {
-      existing.role = "admin";
-      changed = true;
-    }
-    if (changed) existing.updated_at = now();
-    return { db, changed };
+function ensureDbShape(db: LocalDb): LocalDb {
+  if (!Array.isArray(db.email_allowlist)) {
+    db.email_allowlist = [];
   }
-
-  db.users.push(createDefaultAdmin());
-  return { db, changed: true };
+  return db;
 }
 
 async function loadSampleQuestions(): Promise<Question[]> {
@@ -134,12 +93,13 @@ async function loadSampleQuestions(): Promise<Question[]> {
 }
 
 async function createDefaultDb(): Promise<LocalDb> {
-  return {
-    users: [createDefaultAdmin()],
+  return ensureDbShape({
+    users: [],
     questions: await loadSampleQuestions(),
     learning_progress: [],
     exam_records: [],
-  };
+    email_allowlist: [],
+  });
 }
 
 async function readDbFromRedis(): Promise<LocalDb | null> {
@@ -160,24 +120,24 @@ async function loadFreshDb(): Promise<LocalDb> {
 
   if (redis) {
     const existing = await readDbFromRedis();
-    if (existing) return existing;
+    if (existing) return ensureDbShape(existing);
 
     const seed = await createDefaultDb();
     const acquired = await redis.set(REDIS_DB_KEY, seed, { nx: true });
     if (acquired) return seed;
 
     const raced = await readDbFromRedis();
-    if (raced) return raced;
+    if (raced) return ensureDbShape(raced);
 
     throw new Error("数据库加载失败，请稍后重试");
   }
 
-  if (localMemoryDb) return localMemoryDb;
+  if (localMemoryDb) return ensureDbShape(localMemoryDb);
 
   const dbPath = getDbPath();
   try {
     const raw = await readFile(dbPath, "utf8");
-    localMemoryDb = JSON.parse(raw) as LocalDb;
+    localMemoryDb = ensureDbShape(JSON.parse(raw) as LocalDb);
     return localMemoryDb;
   } catch {
     localMemoryDb = await createDefaultDb();
@@ -207,26 +167,20 @@ async function persistDb(db: LocalDb): Promise<void> {
 }
 
 export async function readDb(): Promise<LocalDb> {
-  const db = await loadFreshDb();
-  const { db: synced, changed } = ensureBootstrapAdmin(db);
-  if (changed) {
-    await persistDb(synced);
-  }
-  return synced;
+  return ensureDbShape(await loadFreshDb());
 }
 
 export async function writeDb(db: LocalDb): Promise<void> {
-  await persistDb(db);
+  await persistDb(ensureDbShape(db));
 }
 
 export async function mutateDb(
   mutator: (db: LocalDb) => void | Promise<void>
 ): Promise<LocalDb> {
-  const db = await loadFreshDb();
+  const db = ensureDbShape(await loadFreshDb());
   await mutator(db);
-  const { db: synced } = ensureBootstrapAdmin(db);
-  await persistDb(synced);
-  return synced;
+  await persistDb(db);
+  return db;
 }
 
 export function toProfile(user: LocalUserRecord): Profile {
@@ -243,14 +197,67 @@ export function toProfile(user: LocalUserRecord): Profile {
   };
 }
 
-export async function findUserByUsername(username: string) {
+export async function findUserById(userId: string) {
   const db = await readDb();
-  return db.users.find((u) => u.username === username.trim());
+  return db.users.find((u) => u.id === userId);
+}
+
+export async function findUserByEmail(email: string) {
+  const normalized = email.trim().toLowerCase();
+  const db = await readDb();
+  return db.users.find((u) => u.email.toLowerCase() === normalized);
 }
 
 export async function listProfiles() {
   const db = await readDb();
   return db.users.map(toProfile);
+}
+
+function resolveBootstrapAdmin(email: string, uid: string): boolean {
+  const bootstrapEmail = (process.env.DNB_BOOTSTRAP_ADMIN_EMAIL ?? "")
+    .trim()
+    .toLowerCase();
+  const bootstrapUid = (process.env.DNB_BOOTSTRAP_ADMIN_UID ?? "").trim();
+
+  return (
+    (bootstrapEmail.length > 0 && email === bootstrapEmail) ||
+    (bootstrapUid.length > 0 && uid === bootstrapUid)
+  );
+}
+
+export async function ensureProfileForUser(
+  uid: string,
+  email: string
+): Promise<Profile> {
+  const normalizedEmail = email.trim().toLowerCase();
+  let profile: Profile | null = null;
+
+  await mutateDb((db) => {
+    const ts = now();
+    let user = db.users.find((u) => u.id === uid);
+
+    if (!user) {
+      user = {
+        id: uid,
+        email: normalizedEmail,
+        full_name: normalizedEmail.split("@")[0],
+        role: resolveBootstrapAdmin(normalizedEmail, uid) ? "admin" : "user",
+        current_stage: 1,
+        max_passed_stage: 0,
+        certificate_issued_at: null,
+        created_at: ts,
+        updated_at: ts,
+      };
+      db.users.push(user);
+    } else {
+      user.email = normalizedEmail;
+      user.updated_at = ts;
+    }
+
+    profile = toProfile(user);
+  });
+
+  return profile!;
 }
 
 export async function updateUserRole(userId: string, role: UserRole) {
@@ -265,53 +272,83 @@ export async function updateUserRole(userId: string, role: UserRole) {
   return found;
 }
 
-export async function upsertUser(params: {
-  id?: string;
-  username: string;
-  password?: string;
-  full_name?: string | null;
-  role?: UserRole;
-}) {
-  const username = params.username.trim();
-  if (!username) return { error: "用户名不能为空" };
+export async function listEmailAllowlist(): Promise<EmailAllowlistEntry[]> {
+  const db = await readDb();
+  return [...db.email_allowlist].sort((a, b) =>
+    b.created_at.localeCompare(a.created_at)
+  );
+}
+
+export async function addEmailAllowlistEntry(params: {
+  email: string;
+  note?: string | null;
+  createdBy: string;
+}): Promise<{ success?: boolean; error?: string }> {
+  const email = params.email.trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    return { error: "请输入有效邮箱" };
+  }
 
   try {
     await mutateDb((db) => {
-      const ts = now();
-
-      if (params.id) {
-        const user = db.users.find((u) => u.id === params.id);
-        if (!user) throw new Error("用户不存在");
-        user.username = username;
-        user.email = username;
-        user.full_name = params.full_name ?? user.full_name;
-        user.role = params.role ?? user.role;
-        if (params.password) user.password_hash = hashPassword(params.password);
-        user.updated_at = ts;
-        return;
+      if (db.email_allowlist.some((entry) => entry.email === email)) {
+        throw new Error("该邮箱已在白名单中");
       }
 
-      if (!params.password) throw new Error("新建用户必须提供密码");
-      if (db.users.some((u) => u.username === username)) {
-        throw new Error("用户名已存在");
-      }
-
-      db.users.push({
-        id: randomUUID(),
-        username,
-        password_hash: hashPassword(params.password!),
-        email: username,
-        full_name: params.full_name ?? username,
-        role: params.role ?? "user",
-        current_stage: 1,
-        max_passed_stage: 0,
-        certificate_issued_at: null,
-        created_at: ts,
-        updated_at: ts,
+      db.email_allowlist.push({
+        email,
+        note: params.note?.trim() || null,
+        created_at: now(),
+        created_by: params.createdBy,
       });
     });
     return { success: true };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "保存失败" };
+    return { error: e instanceof Error ? e.message : "添加失败" };
   }
+}
+
+export async function removeEmailAllowlistEntry(
+  email: string
+): Promise<{ success?: boolean; error?: string }> {
+  const normalized = email.trim().toLowerCase();
+  let found = false;
+
+  await mutateDb((db) => {
+    const before = db.email_allowlist.length;
+    db.email_allowlist = db.email_allowlist.filter(
+      (entry) => entry.email !== normalized
+    );
+    found = db.email_allowlist.length < before;
+  });
+
+  if (!found) return { error: "白名单条目不存在" };
+  return { success: true };
+}
+
+export async function promoteUserToAdmin(
+  identifier: { email?: string; uid?: string }
+): Promise<{ success?: boolean; error?: string }> {
+  const email = identifier.email?.trim().toLowerCase();
+  const uid = identifier.uid?.trim();
+
+  if (!email && !uid) {
+    return { error: "请提供 email 或 uid" };
+  }
+
+  let found = false;
+  await mutateDb((db) => {
+    const user = db.users.find(
+      (u) =>
+        (uid && u.id === uid) ||
+        (email && u.email.toLowerCase() === email)
+    );
+    if (!user) return;
+    found = true;
+    user.role = "admin";
+    user.updated_at = now();
+  });
+
+  if (!found) return { error: "用户不存在，请先完成一次邮箱登录" };
+  return { success: true };
 }

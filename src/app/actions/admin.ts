@@ -3,9 +3,11 @@
 import { requireAdmin } from "@/lib/auth";
 import { randomUUID } from "crypto";
 import {
+  addEmailAllowlistEntry,
+  listEmailAllowlist,
   mutateDb,
   readDb,
-  upsertUser,
+  removeEmailAllowlistEntry,
   updateUserRole as updateRoleInDb,
 } from "@/lib/local-db";
 import {
@@ -152,42 +154,32 @@ export async function updateUserRole(
   return { success: true };
 }
 
-export async function createUserAccount(
-  username: string,
-  password: string,
-  fullName: string
-): Promise<{ success?: boolean; error?: string }> {
+export async function getEmailAllowlist() {
   await requireAdmin();
-  const result = await upsertUser({
-    username,
-    password,
-    full_name: fullName || username,
-    role: "user",
+  return listEmailAllowlist();
+}
+
+export async function addAllowlistEmail(
+  email: string,
+  note: string
+): Promise<{ success?: boolean; error?: string }> {
+  const admin = await requireAdmin();
+  const result = await addEmailAllowlistEntry({
+    email,
+    note,
+    createdBy: admin.id,
   });
-  if ("error" in result) return result;
-  revalidatePath("/admin/users");
+  if ("error" in result && result.error) return result;
+  revalidatePath("/admin/email-allowlist");
   return { success: true };
 }
 
-export async function resetUserPassword(
-  userId: string,
-  newPassword: string
+export async function removeAllowlistEmail(
+  email: string
 ): Promise<{ success?: boolean; error?: string }> {
   await requireAdmin();
-  const db = await readDb();
-  const user = db.users.find((u) => u.id === userId);
-  if (!user) return { error: "用户不存在" };
-  if (!newPassword || newPassword.length < 6) {
-    return { error: "新密码至少 6 位" };
-  }
-  const result = await upsertUser({
-    id: userId,
-    username: user.username,
-    password: newPassword,
-    full_name: user.full_name,
-    role: user.role,
-  });
-  if ("error" in result) return result;
-  revalidatePath("/admin/users");
+  const result = await removeEmailAllowlistEntry(email);
+  if ("error" in result && result.error) return result;
+  revalidatePath("/admin/email-allowlist");
   return { success: true };
 }

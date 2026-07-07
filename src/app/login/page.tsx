@@ -1,4 +1,4 @@
-import { LoginForm } from "@/components/auth/login-form";
+import { LoginForm } from "@/components/auth/login-form-loader";
 import { getProfile, redirectIfStaleSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 

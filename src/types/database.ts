@@ -1,4 +1,11 @@
 export type UserRole = "admin" | "user";
+
+export interface EmailAllowlistEntry {
+  email: string;
+  note: string | null;
+  created_at: string;
+  created_by: string;
+}
 export type QuestionType = "single" | "multiple" | "drag";
 export type ExamStatus = "in_progress" | "completed" | "abandoned";
 

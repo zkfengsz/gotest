@@ -6,6 +6,7 @@ export const SESSION_COOKIE = "dnb_local_session";
 export interface SessionPayload {
   userId: string;
   role: UserRole;
+  accessToken?: string;
 }
 
 export async function getSession(): Promise<SessionPayload | null> {
