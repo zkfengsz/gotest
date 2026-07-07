@@ -2,7 +2,7 @@
 
 import { isEmailAllowed, normalizeEmail } from "@/lib/email-access";
 import { verifyAccessToken } from "@/lib/cloudbase/server";
-import { ensureProfileForUser } from "@/lib/local-db";
+import { ensureProfileForUser, findUserById } from "@/lib/local-db";
 import { clearSession, setSession } from "@/lib/session";
 import { redirect } from "next/navigation";
 
@@ -37,6 +37,10 @@ export async function completeEmailLogin(params: {
   if (!valid) return { error: "登录验证失败，请重新获取验证码" };
 
   const profile = await ensureProfileForUser(params.uid, normalized);
+  const latest = await findUserById(profile.id);
+  if (latest?.is_disabled) {
+    return { error: "账号已被管理员禁用，请联系管理员" };
+  }
   await setSession({
     userId: profile.id,
     role: profile.role,

@@ -189,6 +189,7 @@ export function toProfile(user: LocalUserRecord): Profile {
     email: user.email,
     full_name: user.full_name,
     role: user.role,
+    is_disabled: user.is_disabled ?? false,
     current_stage: user.current_stage,
     max_passed_stage: user.max_passed_stage,
     certificate_issued_at: user.certificate_issued_at,
@@ -242,6 +243,7 @@ export async function ensureProfileForUser(
         email: normalizedEmail,
         full_name: normalizedEmail.split("@")[0],
         role: resolveBootstrapAdmin(normalizedEmail, uid) ? "admin" : "user",
+        is_disabled: false,
         current_stage: 1,
         max_passed_stage: 0,
         certificate_issued_at: null,
@@ -268,6 +270,44 @@ export async function updateUserRole(userId: string, role: UserRole) {
     found = true;
     user.role = role;
     user.updated_at = now();
+  });
+  return found;
+}
+
+export async function softDeleteUser(userId: string): Promise<boolean> {
+  let found = false;
+  await mutateDb((db) => {
+    const user = db.users.find((u) => u.id === userId);
+    if (!user) return;
+    found = true;
+    user.is_disabled = true;
+    user.updated_at = now();
+  });
+  return found;
+}
+
+export async function restoreUser(userId: string): Promise<boolean> {
+  let found = false;
+  await mutateDb((db) => {
+    const user = db.users.find((u) => u.id === userId);
+    if (!user) return;
+    found = true;
+    user.is_disabled = false;
+    user.updated_at = now();
+  });
+  return found;
+}
+
+export async function hardDeleteUser(userId: string): Promise<boolean> {
+  let found = false;
+  await mutateDb((db) => {
+    const beforeUsers = db.users.length;
+    db.users = db.users.filter((u) => u.id !== userId);
+    found = db.users.length < beforeUsers;
+    if (!found) return;
+
+    db.learning_progress = db.learning_progress.filter((p) => p.user_id !== userId);
+    db.exam_records = db.exam_records.filter((e) => e.user_id !== userId);
   });
   return found;
 }

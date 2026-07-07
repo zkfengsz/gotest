@@ -13,12 +13,14 @@ export async function getProfile(): Promise<Profile | null> {
 
   const user = await findUserById(session.userId);
   if (!user) return null;
+  if (user.is_disabled) return null;
 
   return {
     id: user.id,
     email: user.email,
     full_name: user.full_name,
     role: user.role,
+    is_disabled: user.is_disabled ?? false,
     current_stage: user.current_stage,
     max_passed_stage: user.max_passed_stage,
     certificate_issued_at: user.certificate_issued_at,

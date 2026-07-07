@@ -1,6 +1,11 @@
 "use client";
 
-import { updateUserRole } from "@/app/actions/admin";
+import {
+  hardDeleteUser,
+  restoreUser,
+  softDeleteUser,
+  updateUserRole,
+} from "@/app/actions/admin";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +29,30 @@ export function UserTable({ profiles, progress, exams }: UserTableProps) {
     const result = await updateUserRole(userId, role);
     if (result.error) toast.error(result.error);
     else toast.success("角色已更新");
+  }
+
+  async function handleSoftDelete(userId: string) {
+    const ok = window.confirm("确认软删除该账号？软删除后账号不可登录，但学习/考试记录会保留。");
+    if (!ok) return;
+    const result = await softDeleteUser(userId);
+    if (result.error) toast.error(result.error);
+    else toast.success("账号已禁用（软删除）");
+  }
+
+  async function handleHardDelete(userId: string) {
+    const ok = window.confirm(
+      "确认硬删除该账号？这会永久删除该用户及其学习进度与考试记录，无法恢复。"
+    );
+    if (!ok) return;
+    const result = await hardDeleteUser(userId);
+    if (result.error) toast.error(result.error);
+    else toast.success("账号已永久删除");
+  }
+
+  async function handleRestore(userId: string) {
+    const result = await restoreUser(userId);
+    if (result.error) toast.error(result.error);
+    else toast.success("账号已恢复，可重新登录");
   }
 
   function getUserProgress(userId: string) {
@@ -66,6 +95,11 @@ export function UserTable({ profiles, progress, exams }: UserTableProps) {
                   <Badge variant={p.role === "admin" ? "default" : "secondary"}>
                     {p.role === "admin" ? "管理员" : "用户"}
                   </Badge>
+                  {p.is_disabled ? (
+                    <Badge variant="outline" className="ml-2 text-destructive border-destructive">
+                      已禁用
+                    </Badge>
+                  ) : null}
                 </td>
                 <td className="px-4 py-3">Stage {p.current_stage}</td>
                 <td className="px-4 py-3">
@@ -89,20 +123,49 @@ export function UserTable({ profiles, progress, exams }: UserTableProps) {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <Select
-                    value={p.role}
-                    onValueChange={(v) =>
-                      v && handleRoleChange(p.id, v as "admin" | "user")
-                    }
-                  >
-                    <SelectTrigger className="w-28 h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="user">用户</SelectItem>
-                      <SelectItem value="admin">管理员</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={p.role}
+                      onValueChange={(v) =>
+                        v && handleRoleChange(p.id, v as "admin" | "user")
+                      }
+                    >
+                      <SelectTrigger className="w-28 h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="user">用户</SelectItem>
+                        <SelectItem value="admin">管理员</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => handleSoftDelete(p.id)}
+                      disabled={p.is_disabled}
+                    >
+                      软删除
+                    </Button>
+                    {p.is_disabled ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-8"
+                        onClick={() => handleRestore(p.id)}
+                      >
+                        恢复账号
+                      </Button>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-8"
+                      onClick={() => handleHardDelete(p.id)}
+                    >
+                      硬删除
+                    </Button>
+                  </div>
                 </td>
               </tr>
             );

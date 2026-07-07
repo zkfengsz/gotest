@@ -14,6 +14,7 @@ export interface Profile {
   email: string;
   full_name: string | null;
   role: UserRole;
+  is_disabled?: boolean;
   current_stage: number;
   max_passed_stage: number;
   certificate_issued_at: string | null;

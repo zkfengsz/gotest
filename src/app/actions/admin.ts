@@ -4,10 +4,13 @@ import { requireAdmin } from "@/lib/auth";
 import { randomUUID } from "crypto";
 import {
   addEmailAllowlistEntry,
+  hardDeleteUser as hardDeleteUserInDb,
   listEmailAllowlist,
   mutateDb,
   readDb,
   removeEmailAllowlistEntry,
+  restoreUser as restoreUserInDb,
+  softDeleteUser as softDeleteUserInDb,
   updateUserRole as updateRoleInDb,
 } from "@/lib/local-db";
 import {
@@ -27,6 +30,7 @@ export async function getAllUsers() {
       email: u.email,
       full_name: u.full_name,
       role: u.role,
+      is_disabled: u.is_disabled ?? false,
       current_stage: u.current_stage,
       max_passed_stage: u.max_passed_stage,
       certificate_issued_at: u.certificate_issued_at,
@@ -149,6 +153,36 @@ export async function updateUserRole(
 ): Promise<{ success?: boolean; error?: string }> {
   await requireAdmin();
   const ok = await updateRoleInDb(userId, role);
+  if (!ok) return { error: "用户不存在" };
+  revalidatePath("/admin/users");
+  return { success: true };
+}
+
+export async function softDeleteUser(
+  userId: string
+): Promise<{ success?: boolean; error?: string }> {
+  await requireAdmin();
+  const ok = await softDeleteUserInDb(userId);
+  if (!ok) return { error: "用户不存在" };
+  revalidatePath("/admin/users");
+  return { success: true };
+}
+
+export async function hardDeleteUser(
+  userId: string
+): Promise<{ success?: boolean; error?: string }> {
+  await requireAdmin();
+  const ok = await hardDeleteUserInDb(userId);
+  if (!ok) return { error: "用户不存在" };
+  revalidatePath("/admin/users");
+  return { success: true };
+}
+
+export async function restoreUser(
+  userId: string
+): Promise<{ success?: boolean; error?: string }> {
+  await requireAdmin();
+  const ok = await restoreUserInDb(userId);
   if (!ok) return { error: "用户不存在" };
   revalidatePath("/admin/users");
   return { success: true };
